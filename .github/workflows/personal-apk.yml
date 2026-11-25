@@ -1,0 +1,79 @@
+name: personal-apk
+
+# Optimized (RELEASE=1) APKs for your own phone, built from your fork with one click:
+# Actions → personal-apk → Run workflow. No release secrets needed.
+#
+# Signing: if the repository secrets RELEASE_KEYSTORE_B64 and RELEASE_KS_PASS exist (key alias "recomp"), those are used,
+# so every build can be installed over the previous one. Without them a throw-away key is made for this run, and a
+# new build then needs the old app uninstalled first (your game folder and saves stay on the phone, they are not in the app).
+#
+# Outputs (Actions run → Artifacts → mhriseport-apks):
+#   mhriseport.apk         normal package name
+#   mhriseport-antutu.apk  same app under AnTuTu's package name: many MediaTek phones (Dimensity included) then keep
+#                          the CPU/GPU at full clock. Installs next to the normal one; pick the game folder again in it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [stock-build]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK packages
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "ndk;28.2.13676358" "build-tools;35.0.0" "platforms;android-33" > /dev/null
+      - name: Third-party sources
+        run: bash tools/setup.sh
+      - name: Runtime compute shaders
+        run: bash tools/shaders.sh
+      - name: Mod archive library cache
+        uses: actions/cache@v4
+        with:
+          path: build/mod-dependencies
+          key: mod-dependencies-${{ hashFiles('tools/mod_archive_dependency.py') }}
+      - name: FFmpeg cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/ffmpeg-android
+          key: ffmpeg-android-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: FFmpeg (video fallback)
+        run: bash tools/build_ffmpeg.sh
+      - name: Build optimized APKs
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          KS_PASS_SECRET: ${{ secrets.RELEASE_KS_PASS }}
+          LUA_LAB: '1'
+        run: |
+          set -euo pipefail
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KS_PASS_SECRET" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export KS_PASS="$KS_PASS_SECRET"
+            echo "Signing with the repository's release key"
+          else
+            export KS_PASS="$(openssl rand -hex 12)"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -storepass "$KS_PASS" -keypass "$KS_PASS" \
+              -alias recomp -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=MH Rise personal build" > /dev/null
+            echo "::warning::No release key secrets: signed with a throw-away key. Uninstall the previous build before installing this one."
+          fi
+          export RELEASE=1 KEYSTORE="$RUNNER_TEMP/release.jks" KEY_ALIAS=recomp
+          APK_OUT="build/mhriseport.apk" bash tools/build_apk.sh
+          APK_OUT="build/mhriseport-antutu.apk" PACKAGE=com.antutu.ABenchMark LABEL="MH Rise port (AnTuTu)" bash tools/build_apk.sh
+          rm -f "$RUNNER_TEMP/release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mhriseport-apks
+          path: |
+            build/mhriseport.apk
+            build/mhriseport-antutu.apk
+          if-no-files-found: error
