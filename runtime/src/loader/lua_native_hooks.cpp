@@ -495,7 +495,7 @@ void describe_site(Site &site, uint32_t method, const Layout &layout,
   bool wrapper = address != module->addr(module->seg_off[0] + dest);
   auto offset = read<int32_t>(db->methods, 12ull * method + 8);
   std::unordered_map<uint32_t, Layout> owners;
-  bool distinguishable = true, compatible = true;
+  bool distinguishable = true, compatible = true, folded = false;
   for (auto it = begin; it != end; ++it) {
     auto k = it->second;
     auto row = 12ull * k;
@@ -509,8 +509,12 @@ void describe_site(Site &site, uint32_t method, const Layout &layout,
     distinguishable &= instance && !derives(owner, db->find("System.ValueType"));
     compatible &= layout == candidate;
     auto [where, fresh] = owners.emplace(owner, candidate);
-    if (!fresh && !(where->second == candidate))
-      throw std::runtime_error("Same receiver has incompatible signatures at shared entry");
+    if (!fresh && !(where->second == candidate)) {
+      // Methods of one class the compiler made into one function (PlayerNetwork's 26 receive(packet, int) overloads,
+      // with others). The code is the same, so it reads its registers the same way whichever was called: the hook
+      // reads them as the hooked one declares them, and also sees the others' calls. (The stack size was checked above.)
+      folded = true;
+    }
   }
   if (!distinguishable && !compatible)
     throw std::runtime_error("Shared entry has no receiver to distinguish incompatible signatures");
@@ -518,6 +522,13 @@ void describe_site(Site &site, uint32_t method, const Layout &layout,
     for (auto &[owner, candidate] : owners)
       site.owners.push_back(owner);
     std::sort(site.owners.begin(), site.owners.end());
+  }
+  if (folded) {
+    auto owner = read<uint32_t>(db->methods, 12ull * method) & id_mask;
+    log_message(ANDROID_LOG_INFO, ("Shared hook entry: " + db->full_name(owner) + "." +
+                                   std::string(db->method(method, owner)) +
+                                   " is one function with other overloads; its hooks see their calls too")
+                                      .c_str());
   }
   log_message(ANDROID_LOG_INFO, site.owners.empty()
       ? "Shared hook entry: methods with identical calling convention share callbacks"

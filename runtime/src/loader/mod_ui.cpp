@@ -164,9 +164,18 @@ bool key_state(lua_State *L, int which) {
 }
 int more_widgets(lua_State *L, Widget kind);
 int widget(lua_State *L) {
-  if (!drawing)
-    return luaL_error(L, "imgui requires an active on_frame or on_draw_ui callback");
   auto kind = static_cast<Widget>(lua_tointeger(L, lua_upvalueindex(1)));
+  if (!drawing) {
+    // REFramework lets a script load its fonts while it loads, and most do it there (Qurious Cheating stopped on it).
+    // Fonts are no-ops here anyway: one font, the system's.
+    if (kind == LoadFont) {
+      lua_pushnil(L);
+      return 1;
+    }
+    if (kind == PushFont || kind == PopFont || kind == PushFontSize || kind == PopFontSize)
+      return 0;
+    return luaL_error(L, "imgui requires an active on_frame or on_draw_ui callback");
+  }
   auto end = [&](Scope scope) {
     if (scopes.empty() || scopes.back() != scope)
       return luaL_error(L, "ImGui scope closed out of order");

@@ -14,7 +14,7 @@ name: personal-apk
 on:
   workflow_dispatch:
   push:
-    branches: [gt30-optimized]
+    branches: [gt30-122]
 
 permissions:
   contents: read

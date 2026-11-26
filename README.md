@@ -39,10 +39,6 @@ resolution drops for a moment instead of the frame rate, and FSR 1 scales the pi
 
 The log (`log.txt` in the data folder) says what the port picked for your phone.
 
-## Fork note
-
-This fork only adds `.github/workflows/personal-apk.yml` (Actions → personal-apk → Run workflow builds an optimized APK and an AnTuTu-package one). The game code is the stock port.
-
 ## What's in it
 
 - **Touch controls** laid out like a real controller, with a full editor (size, position, opacity, your own pictures
