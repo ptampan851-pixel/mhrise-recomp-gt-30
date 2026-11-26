@@ -1680,6 +1680,17 @@ private:
     // so they don't show without their pre-pass. Anything that reads the depth between the two passes sees it empty.
     bool skip_prepass_ = false;
     bool prepass_skip_logged_ = false;
+    // EXPERIMENTAL (<datos>/skip_post_small, Graphics menu): the small full-screen passes at 320x180 into an R11G11B10F target
+    // (no depth) are not drawn. From the GPU profile on a Mali-G615 MC2 they are two draws costing 3.4-3.7 ms: the heavy
+    // blur of the post-processing chain (bloom or depth of field; the Switch game never reads the PC's options for them).
+    // The pass is still opened, so its target holds whatever its load op leaves.
+    bool skip_post_ = false;
+    bool post_small_logged_ = false;
+    bool small_post_pass() const {
+        if (st_.rt.depth || st_.rt.count < 1 || !st_.rt.colors[0]) return false;
+        const auto& d = st_.rt.colors[0]->desc;
+        return d.width == 320 && d.height == 180 && d.format == 0x3f && st_.rt.colors[0]->layers <= 1;
+    }
     bool scene_prepass() const {
         if (!st_.rt.depth || st_.rt.depth->layers > 1) return false;
         if (st_.rt.depth->desc.width != 1280 || st_.rt.depth->desc.height != 720) return false;
@@ -3597,6 +3608,7 @@ void Executor::run(const std::vector<const CommandList*>& lists) {
     log_state_ = NVN_FLAG("verbose_log");
     fast_depth_ = NVN_FLAG("fast_depth");
     skip_prepass_ = NVN_FLAG("skip_prepass");
+    skip_post_ = NVN_FLAG("skip_post_small");
     prof_gpu_report();
     run_stamps_ = 0;
     // A la resolución dinámica se le dice que el frame cuesta lo suyo más LSFG más 2 ms de margen (con todo justo a 32 ms
@@ -7894,6 +7906,17 @@ void Executor::draw(const cmd::Draw& in) {
             prepass_skip_logged_ = true;
             NVN_LOG("depth pre-pass off (<datos>/skip_prepass): scene pre-pass draws skipped (%ux%u depth)\n",
                     st_.rt.depth->desc.width, st_.rt.depth->desc.height);
+        }
+        return;
+    }
+    if (skip_post_ && small_post_pass()) {
+        if (!ensure_render_pass()) {
+            skip_draw(6);  // (pass)
+            return;
+        }
+        if (!post_small_logged_) {
+            post_small_logged_ = true;
+            NVN_LOG("small post passes off (<datos>/skip_post_small): 320x180 R11G11B10F draws skipped\n");
         }
         return;
     }
